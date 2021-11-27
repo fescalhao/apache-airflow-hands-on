@@ -4,6 +4,9 @@ from airflow.sensors.filesystem import FileSensor
 from airflow.operators.python import PythonOperator
 from airflow.operators.bash import BashOperator
 from airflow.providers.apache.hive.operators.hive import HiveOperator
+from airflow.providers.apache.spark.operators.spark_submit import SparkSubmitOperator
+from airflow.operators.email import EmailOperator
+from airflow.providers.slack.operators.slack_webhook import SlackWebhookHook
 
 from datetime import datetime, timedelta
 
@@ -38,6 +41,10 @@ def download_rates():
             with open('/opt/airflow/dags/files/forex_rates.json', 'a') as outfile:
                 json.dump(outdata, outfile)
                 outfile.write('\n')
+
+def _get_message() -> str:
+    return "Slack message"
+
 
 with DAG("forex_data_pipeline", 
         start_date=datetime(2021, 11, 25), 
@@ -94,3 +101,27 @@ with DAG("forex_data_pipeline",
             STORED AS TEXTFILE
         """
     )
+
+    process_rates_spark_task = SparkSubmitOperator(
+        task_id="process_rates_spark_task",
+        application="/opt/airflow/dags/scripts/forex_processing.py",
+        conn_id="spark_conn",
+        verbose=False
+    )
+
+    # send_email_task = EmailOperator(
+    #     task_id="send_email_task",
+    #     to="airflow@airflow.com",
+    #     subject="Test",
+    #     html_content="<h3>Test</h3>"
+    # )
+
+    # send_slack_task = SlackWebhookHook(
+    #     task_id="send_slack_task",
+    #     http_conn_id="slack_conn",
+    #     message=_get_message(),
+    #     channel="#test"
+    # )
+
+    is_forex_rates_available_task >> is_forex_currencies_file_available_task >> download_rates_task >> save_rates_to_hdfs_task
+    save_rates_to_hdfs_task >> create_hive_rates_table >> process_rates_spark_task
